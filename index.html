@@ -11,8 +11,8 @@
       --primary-color: #2B638B;
       --primary-color-gradient: linear-gradient(135deg, #2B638B, #1E4A68);
       --secondary-color: #f0f8ff;  /* changed to a lighter background */
-      --user-message-bg: #dcf8c6;
-      --bot-message-bg: #e3f2fd;
+      --user-chatInput-bg: #dcf8c6;
+      --bot-chatInput-bg: #e3f2fd;
       --text-color: #333;
       --border-radius: 15px;
       --box-shadow-color: rgba(0, 0, 0, 0.1);
@@ -66,7 +66,7 @@
       flex-direction: column;
     }
 
-    .message {
+    .chatInput {
       padding: 12px 16px;
       border-radius: 20px;
       margin-bottom: 15px;
@@ -80,15 +80,15 @@
 
     .user {
       align-self: flex-end;
-      background: var(--user-message-bg);
+      background: var(--user-chatInput-bg);
     }
 
     .bot {
       align-self: flex-start;
-      background: var(--bot-message-bg);
+      background: var(--bot-chatInput-bg);
     }
 
-    .message-timestamp {
+    .chatInput-timestamp {
       font-size: 0.7em;
       color: #666;
       position: absolute;
@@ -96,8 +96,8 @@
       right: 10px;
     }
 
-    .user .message-timestamp {
-      right: 10px; /* keep it on the right for user messages */
+    .user .chatInput-timestamp {
+      right: 10px; /* keep it on the right for user chatInputs */
     }
 
     .chat-input-container {
@@ -172,7 +172,7 @@
       }
     }
 
-    .message-content {
+    .chatInput-content {
       padding-right: 10px;
       display: inline-block;
     }
@@ -208,10 +208,10 @@
       id="userInput"
       class="chat-input"
       placeholder="Type your question..."
-      aria-label="Type your message"
+      aria-label="Type your chatInput"
       autocomplete="off"
     />
-    <button id="sendButton" class="send-button" aria-label="Send Message">
+    <button id="sendButton" class="send-button" aria-label="Send chatInput">
       Send
     </button>
   </footer>
@@ -238,11 +238,11 @@
   const userInput = document.getElementById("userInput");
   const sendButton = document.getElementById("sendButton");
 
-  sendButton.addEventListener("click", sendMessage);
+  sendButton.addEventListener("click", sendchatInput);
   userInput.addEventListener("keypress", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      sendMessage();
+      sendchatInput();
     }
   });
 
@@ -259,42 +259,42 @@
   }
 
   /**
-   * Renders a message in the chat UI.
+   * Renders a chatInput in the chat UI.
    * @param {string} sender - 'user' or 'bot'
-   * @param {string} message - Text to display
+   * @param {string} chatInput - Text to display
    */
-  function addMessage(sender, message) {
-    const messageDiv = document.createElement("div");
-    messageDiv.classList.add("message", sender);
+  function addchatInput(sender, chatInput) {
+    const chatInputDiv = document.createElement("div");
+    chatInputDiv.classList.add("chatInput", sender);
 
     const senderName = sender === "user" ? "You" : "Bot";
     const now = new Date();
     const timestamp = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
     // Escape user-provided text, parse bot text for Markdown
-    let processedMessage = sender === "bot"
-      ? marked.parseInline(message)
-      : escapeHtml(message);
+    let processedchatInput = sender === "bot"
+      ? marked.parseInline(chatInput)
+      : escapeHtml(chatInput);
 
-    messageDiv.innerHTML = `
+    chatInputDiv.innerHTML = `
       <b>${senderName}:</b>
-      <span class="message-content">${processedMessage}</span>
-      <span class="message-timestamp">${timestamp}</span>
+      <span class="chatInput-content">${processedchatInput}</span>
+      <span class="chatInput-timestamp">${timestamp}</span>
     `;
 
-    chatBox.appendChild(messageDiv);
+    chatBox.appendChild(chatInputDiv);
     chatBox.scrollTop = chatBox.scrollHeight;
   }
 
   /**
-   * Sends the user's message and sessionId to the n8n webhook.
+   * Sends the user's chatInput and sessionId to the n8n webhook.
    */
-  async function sendMessage() {
-    const message = userInput.value.trim();
-    if (!message) return;
+  async function sendchatInput() {
+    const chatInput = userInput.value.trim();
+    if (!chatInput) return;
 
-    // Show user message in chat
-    addMessage("user", message);
+    // Show user chatInput in chat
+    addchatInput("user", chatInput);
     userInput.value = "";
     userInput.focus();
 
@@ -304,7 +304,7 @@
     try {
       // Build request body
       const requestBody = {
-        message: message,
+        chatInput: chatInput,
         sessionId: sessionId,
       };
 
@@ -325,14 +325,14 @@
 
       // Suppose your n8n workflow returns something like { output: "...", ... }
       if (data && data.output) {
-        addMessage("bot", data.output);
+        addchatInput("bot", data.output);
       } else {
         // If there's no 'output' property, just show a fallback
-        addMessage("bot", "No output received from server.");
+        addchatInput("bot", "No output received from server.");
       }
     } catch (error) {
       console.error("Error during fetch:", error);
-      addMessage("bot", `Error: ${error.message}`);
+      addchatInput("bot", `Error: ${error.chatInput}`);
     } finally {
       loadingIndicator.classList.remove("active");
     }
