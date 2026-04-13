@@ -1,0 +1,89 @@
+{
+  "name": "Rada Legislation - Daily Incremental Update",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 24 }]
+        }
+      },
+      "name": "Daily Cron",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "command": "cd /home/user/rada-rag && python 4_incremental_update.py >> /var/log/rada-rag/update.log 2>&1; echo $?"
+      },
+      "name": "Run Incremental Update",
+      "type": "n8n-nodes-base.executeCommand",
+      "position": [460, 300],
+      "notes": "Runs the Python update script. Logs to /var/log/rada-rag/update.log"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [{
+            "value1": "={{ $json.stdout.trim() }}",
+            "operation": "equals",
+            "value2": "0"
+          }]
+        }
+      },
+      "name": "Check Exit Code",
+      "type": "n8n-nodes-base.if",
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://data.rada.gov.ua/open/data/nd/en/sp:head",
+        "responseFormat": "json",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "name": "Fetch Rada Updates Feed",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [460, 480],
+      "notes": "Optional: check portal for updates before running script"
+    },
+    {
+      "parameters": {
+        "message": "=✅ Rada RAG update completed successfully\nTime: {{ $now }}\nNew laws indexed.",
+        "additionalFields": {}
+      },
+      "name": "Success Notification",
+      "type": "n8n-nodes-base.telegram",
+      "position": [900, 240],
+      "notes": "Replace with your preferred notification channel (Slack, email, etc.)"
+    },
+    {
+      "parameters": {
+        "message": "=❌ Rada RAG update failed\nTime: {{ $now }}\nExit code: {{ $json.stdout }}\nCheck logs at /var/log/rada-rag/update.log",
+        "additionalFields": {}
+      },
+      "name": "Failure Notification",
+      "type": "n8n-nodes-base.telegram",
+      "position": [900, 380],
+      "notes": "Alert on failure"
+    }
+  ],
+  "connections": {
+    "Daily Cron": {
+      "main": [[{ "node": "Run Incremental Update", "type": "main", "index": 0 }]]
+    },
+    "Run Incremental Update": {
+      "main": [[{ "node": "Check Exit Code", "type": "main", "index": 0 }]]
+    },
+    "Check Exit Code": {
+      "main": [
+        [{ "node": "Success Notification", "type": "main", "index": 0 }],
+        [{ "node": "Failure Notification", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "notes": "Runs 4_incremental_update.py daily. Connects to existing n8n infra. Adjust notification node to Telegram/Slack/email as needed."
+}
