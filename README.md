@@ -1,148 +1,84 @@
-# chatbot-ukr-law
+# rada-rag: Ukrainian Legislation RAG Pipeline
 
-## Overview
-
-The AI Agent UKR Legal Adviser is a personal solution designed to provide preliminary legal advice and legislative information before incurring on legal fees, tailored for Ukrainian NGOs involved in humanitarian operations. This project combines a modern, responsive chat interface with a robust backend workflow (powered by n8n) that integrates advanced AI language models, document retrieval systems, and multiple external data sources to deliver accurate, context-aware legal guidance.
-
-The information about the Knowledge Base can be consulted here: 
-
-Features
-
-  Interactive Chat Interface
-    A user-friendly, responsive web-based chat application built with HTML, CSS, and JavaScript. It supports Markdown rendering for enhanced message formatting.
-
-  AI-Powered Legal Advising
-    Leverages state-of-the-art language models (OpenAI Chat Model, Google Gemini) to process user queries and generate detailed legal responses.
-
-  Dynamic Document Retrieval
-    Utilizes vector search (via Supabase) and contextual memory (using Postgres) to fetch relevant legislation and legal documents.
-
-  Automated Document Ingestion & Processing
-    Integrates with Google Drive and Google Sheets to automatically ingest, parse, and update legislative documents, with additional translation support via DeepL.
-
-  External API Integrations
-    Connects to multiple external APIs (SerpAPI, ACAPS, Llama Cloud Parser, etc.) to enrich responses with up-to-date data and context.
+Updatable RAG knowledge base built from Verkhovna Rada legislation.
 
 ## Architecture
 
-The project consists of two primary components:
+```
+data.rada.gov.ua (catalogue JSON)
+        ↓  [1_fetch_catalogue.py]
+    catalogue.json  (law IDs + metadata)
+        ↓  [2_scrape_laws.py]
+    laws/  (raw HTML -> structured JSON per law)
+        ↓  [3_chunk_embed.py]
+    Qdrant collection  (vectors + payloads)
+        ↑  [4_incremental_update.py]  <- run via n8n cron
+data.rada.gov.ua (new IDs since last run)
+```
 
-  Frontend (Chat Interface):
-        A single-page application that handles user interactions.
-        Sends user queries via a POST request to the n8n webhook endpoint.
+## Stack
 
-  Backend (n8n Workflows):
-        A series of interconnected nodes that process incoming messages.
-        Integrates AI models, external data sources, document processing tools, and databases.
-        Maintains conversation context using a Postgres-based chat memory node.
+- Scraper: `requests` + `BeautifulSoup` (`lxml`)
+- Extraction: Docling service (`DOCLING_API_URL`) with HTML fallback parser
+- Embeddings: `mxbai-embed-large` via Ollama
+- Vector store: Qdrant
+- RAG query: Ollama chat model
+- Orchestration: n8n (incremental updates)
 
-## Technologies Used
+## Setup
 
-  Frontend:
-        HTML5, CSS3, JavaScript
-        Marked.js for Markdown parsing
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
 
-  Backend:
-        n8n for workflow automation
-        AI models: OpenAI Chat Model & Google Gemini Chat Model
-        External APIs: SerpAPI, ACAPS, Llama Cloud Parser, DeepL
-        Databases: Postgres (for chat memory) and Supabase (for vector store)
-        Integrations: Google Drive (document triggers) and Google Sheets (data export)
+# 2. Configure environment
+cp .env.example .env
+# Edit .env: set QDRANT_URL, QDRANT_API_KEY,
+# OLLAMA_BASE_URL, OLLAMA_MODEL, EMBED_MODEL, DOCLING_API_URL
 
-## Setup and Installation
-### Prerequisites
+# 3. (Optional) run local Qdrant
+docker compose up -d
+```
 
-  Web Server: To host the frontend HTML file.
-  n8n Instance: To run and manage backend workflows.
-  API keys/credentials for:
-        OpenAI (or your chosen AI provider)
-        Google Gemini / Google PaLM API
-        SerpAPI
-        Postgres database
-        Supabase account
-        Google Drive and Google Sheets APIs
-        DeepL API
-        Llama Cloud Parser
-        ACAPS API
-
-### Frontend Setup
-
-  Host the HTML File:
-    Place the provided index.html (or similar) file on your web server. Ensure it is accessible to users.
-
-  Dependencies:
-    The chat interface uses the Marked.js library via CDN. Verify that your internet connection allows access to the CDN, or host the library locally if necessary.
-
-  Configuration:
-    The JavaScript in the HTML file sends a POST request to
-
-### Backend (n8n) Setup
-
-  Import Workflow:
-    Import the provided n8n workflow JSON file into your n8n instance. This workflow contains all nodes necessary for:
-        Receiving chat messages via a webhook.
-        Processing queries with AI and external tools.
-        Managing document retrieval and context memory.
-        Integrating with Google Sheets, Supabase, Postgres, and other services.
-
-  Configure Credentials:
-    Set up and assign credentials in n8n for each service:
-        OpenAI API / Google Gemini API
-        SerpAPI
-        Postgres
-        Supabase
-        Google Drive & Google Sheets (OAuth2)
-        DeepL
-        Llama Cloud Parser
-        ACAPS API
-
-  ### Adjust Node Settings:
-  Review the node configurations (e.g., webhook paths, API endpoints, custom prompts) and adjust them as needed for your environment.
-
-  ### Activate Workflow:
-  Once configured, activate the workflow to enable processing of incoming chat messages.
+Notes:
+- `.env` is ignored by git. Commit only placeholder values in `.env.example`.
+- `QDRANT_URL` is the canonical variable name.
 
 ## Usage
 
-  Access the Chat Interface:
-    Open the hosted HTML page in your browser [jbaena.net/](https://jbaena.net/portfolio/chatbot-ukr-law)
+```bash
+# Full bootstrap
+python 1_fetch_catalogue.py
+python 2_scrape_laws.py
+python 3_chunk_embed.py
 
-  Enter a Query:
-    Type your question related to Ukrainian legislation into the chat input field and press "Send".
+# Incremental update (daily via n8n)
+python 4_incremental_update.py
 
-  Receive a Response:
-    Your query is forwarded to the n8n backend where it is processed by the AI agent. The response, enriched with relevant legal data and document references, will appear in the chat window.
+# Query
+python 5_query.py "права внутрішньо переміщених осіб"
+python 5_query.py "IDP rights during martial law"
+```
 
-  Conversation Context:
-    The system maintains conversation context using Postgres-based chat memory, ensuring responses remain relevant across multiple interactions.
+## Scope Filtering
 
-## Workflow Details
+Set optional filters in `.env`:
+- `CATEGORY_FILTER=humanitarian`
+- `DATE_FROM=2022-02-24`
+- `MAX_LAWS=5000`
 
-  Webhook Node:
-    Receives user messages and triggers the workflow.
+## Indexed Laws Tracker
 
-  AI Agent Node:
-    Processes queries using AI models (OpenAI, Google Gemini) and interacts with external tools like SerpAPI and ACAPS.
+The list of laws currently embedded in the vector collection is maintained in [INDEXED_LAWS.md](INDEXED_LAWS.md), including English titles, law IDs, section counts, and chunk counts.
 
-  Memory Integration:
-    Utilizes a Postgres chat memory node to store and manage conversation context.
+## Files
 
-  Document Retrieval & Processing:
-        Retrieves documents via Supabase Vector Store.
-        Processes legal documents using Llama Cloud Parser and translates content with DeepL.
-        Updates legislative metadata in Google Sheets.
-
-  Data Persistence:
-    Inserts or updates processed document data into Supabase and Postgres for future reference and semantic search.
-
-## Contributing
-
-Contributions are welcome! If you have improvements, bug fixes, or additional features, please fork the repository and submit a pull request. For major changes, please open an issue first to discuss what you would like to change.
-
-MIT License.
-
-## Acknowledgements
-
-  Thanks to the n8n community for their support.
-  Special thanks to the providers of the external APIs and services (OpenAI, Google, SerpAPI, ACAPS, DeepL, etc.).
-  Gratitude to the Ukrainian NGO community and legal experts for inspiring this project.
+| File | Purpose |
+|------|---------|
+| `1_fetch_catalogue.py` | Download law ID catalogue from open data portal |
+| `2_scrape_laws.py` | Scrape full text from zakon.rada.gov.ua |
+| `3_chunk_embed.py` | Chunk, embed, upsert to Qdrant |
+| `4_incremental_update.py` | Delta updates (new laws since last run) |
+| `5_query.py` | RAG query interface |
+| `config.py` | Shared config and constants |
+| `docker-compose.yml` | Qdrant service |

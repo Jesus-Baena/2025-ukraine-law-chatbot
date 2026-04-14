@@ -12,18 +12,22 @@ import json
 import time
 import requests
 from datetime import datetime, date
-from pathlib import Path
-from sentence_transformers import SentenceTransformer
 
 from config import (
-    DATA_DIR, LAWS_DIR, STATE_PATH, QDRANT_URL, QDRANT_COLLECTION,
-    EMBED_MODEL, REQUEST_DELAY, REQUEST_TIMEOUT, REQUEST_DELAY
+    LAWS_DIR, STATE_PATH, QDRANT_COLLECTION,
+    REQUEST_DELAY, REQUEST_TIMEOUT
 )
 from qdrant_client import QdrantClient
 
-# Import helpers from other steps
-from 2_scrape_laws import fetch_with_retry, extract_law, safe_filename
-from 3_chunk_embed import law_to_chunks, embed_chunks, upsert_to_qdrant, setup_qdrant
+from embedding_pipeline import (
+    delete_law_from_qdrant,
+    embed_chunks,
+    law_to_chunks,
+    setup_qdrant,
+    upsert_to_qdrant,
+)
+from law_processing import extract_law, fetch_with_retry, safe_filename
+from service_clients import get_qdrant_client
 
 
 HEADERS = {
@@ -91,22 +95,7 @@ def fetch_updated_ids(since_date: str) -> list[dict]:
     return updated
 
 
-def delete_law_from_qdrant(client: QdrantClient, law_id: str):
-    """Remove all chunks for a law from Qdrant (before re-inserting)."""
-    from qdrant_client.models import Filter, FieldCondition, MatchValue
-    client.delete(
-        collection_name=QDRANT_COLLECTION,
-        points_selector=Filter(
-            must=[FieldCondition(
-                key="law_id",
-                match=MatchValue(value=law_id)
-            )]
-        )
-    )
-
-
-def process_law(entry: dict, model: SentenceTransformer,
-                client: QdrantClient) -> bool:
+def process_law(entry: dict, client: QdrantClient) -> bool:
     """Scrape, embed, and upsert a single law. Returns True on success."""
     law_id = entry["id"]
     url = f"https://zakon.rada.gov.ua/laws/show/{law_id}"
@@ -136,7 +125,7 @@ def process_law(entry: dict, model: SentenceTransformer,
 
     chunks = law_to_chunks(law)
     if chunks:
-        embeddings = embed_chunks(model, chunks)
+        embeddings = embed_chunks(chunks)
         upsert_to_qdrant(client, chunks, embeddings)
 
     return True
@@ -162,13 +151,8 @@ def main():
         return
 
     # Setup
-    client = QdrantClient(url=QDRANT_URL)
+    client = get_qdrant_client()
     setup_qdrant(client)
-
-    import torch
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"\nLoading {EMBED_MODEL} on {device}...")
-    model = SentenceTransformer(EMBED_MODEL, device=device)
 
     # Process each updated law
     success = 0
@@ -176,7 +160,7 @@ def main():
 
     for i, entry in enumerate(updated_entries):
         print(f"[{i+1}/{len(updated_entries)}] {entry['id']}: {entry['title'][:60]}")
-        ok = process_law(entry, model, client)
+        ok = process_law(entry, client)
         if ok:
             success += 1
         else:

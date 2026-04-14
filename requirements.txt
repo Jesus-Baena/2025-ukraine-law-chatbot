@@ -1,0 +1,6 @@
+beautifulsoup4
+lxml
+python-dotenv
+qdrant-client
+requests
+tqdm

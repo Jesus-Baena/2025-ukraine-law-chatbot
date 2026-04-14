@@ -11,6 +11,7 @@ import json
 import csv
 import io
 import time
+import re
 import requests
 from pathlib import Path
 from config import (
@@ -39,7 +40,14 @@ def fetch_catalogue_json(url: str) -> list[dict]:
     """Attempt to fetch catalogue as JSON."""
     r = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
     r.raise_for_status()
-    return r.json()
+    data = r.json()
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        # Current feed is wrapped in an RSS-like envelope with records in `item`.
+        if isinstance(data.get("item"), list):
+            return data["item"]
+    raise ValueError("Unsupported JSON catalogue format")
 
 
 def fetch_catalogue_csv(url: str) -> list[dict]:
@@ -94,6 +102,53 @@ def normalize_entry(raw: dict) -> dict | None:
         "status": status,
         "url": f"https://zakon.rada.gov.ua/laws/show/{law_id}",
     }
+
+
+def is_law_id(value: str) -> bool:
+    """Heuristic: real law IDs usually contain digits (e.g. 1706-18, 2341-14)."""
+    return bool(re.search(r"\d", value))
+
+
+def fetch_catalogue_doc_txt(max_items: int = 5000) -> list[dict]:
+    """Fetch and parse the large laws feed from doc.txt (cp1251 encoded)."""
+    url = "https://data.rada.gov.ua/ogd/zak/laws/data/csv/doc.txt"
+    r = requests.get(url, headers=HEADERS, timeout=max(REQUEST_TIMEOUT, 60))
+    r.raise_for_status()
+
+    text = r.content.decode("cp1251", errors="ignore")
+    entries = []
+    pattern = re.compile(r"^\s*\d+\s+(\S+)\s+(.*?)\s+(\d{8})\s*$")
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = pattern.match(line)
+        if not m:
+            continue
+
+        law_id = m.group(1).strip()
+        title = m.group(2).strip()
+        raw_date = m.group(3)
+        date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}"
+
+        if not is_law_id(law_id):
+            continue
+
+        entries.append(
+            {
+                "id": law_id,
+                "title": title,
+                "date": date,
+                "category": "",
+                "status": "unknown",
+                "url": f"https://zakon.rada.gov.ua/laws/show/{law_id}",
+            }
+        )
+        if len(entries) >= max_items:
+            break
+
+    return entries
 
 
 def apply_filters(entries: list[dict]) -> list[dict]:
@@ -187,6 +242,24 @@ def main():
     # Normalize
     entries = [normalize_entry(r) for r in raw_entries]
     entries = [e for e in entries if e]  # drop None
+
+    # The `zak.json` endpoint may return dataset metadata (laws/docs/dict/...) instead
+    # of law records. If IDs don't look like laws, use the built-in minimal seed set.
+    if entries and sum(1 for e in entries if is_law_id(e["id"])) < max(1, len(entries) // 2):
+        print("\n⚠ Feed returned metadata entries instead of law records. Trying doc.txt fallback...")
+        try:
+            entries = fetch_catalogue_doc_txt(max_items=max(MAX_LAWS * 5, 2000))
+            print(f"  ✓ Parsed {len(entries)} candidate law entries from doc.txt")
+        except Exception as e:
+            print(f"  ✗ doc.txt fallback failed: {e}")
+            print("  Using minimal test set...")
+            entries = [
+                {"id": "2341-14", "title": "Кримінальний кодекс України", "date": "2001-04-05", "category": "Закон", "status": "Valid", "url": "https://zakon.rada.gov.ua/laws/show/2341-14"},
+                {"id": "254%D0%BA%2F96-%D0%B2%D1%80", "title": "Конституція України", "date": "1996-06-28", "category": "Закон", "status": "Valid", "url": "https://zakon.rada.gov.ua/laws/show/254%D0%BA%2F96-%D0%B2%D1%80"},
+                {"id": "1706-18", "title": "Про забезпечення прав і свобод внутрішньо переміщених осіб", "date": "2014-10-20", "category": "Закон", "status": "Valid", "url": "https://zakon.rada.gov.ua/laws/show/1706-18"},
+                {"id": "389-19", "title": "Про правовий режим воєнного стану", "date": "2015-05-12", "category": "Закон", "status": "Valid", "url": "https://zakon.rada.gov.ua/laws/show/389-19"},
+                {"id": "2801-12", "title": "Основи законодавства України про охорону здоров'я", "date": "1992-11-19", "category": "Закон", "status": "Valid", "url": "https://zakon.rada.gov.ua/laws/show/2801-12"},
+            ]
     print(f"\nNormalized: {len(entries)} entries")
 
     # Apply filters
