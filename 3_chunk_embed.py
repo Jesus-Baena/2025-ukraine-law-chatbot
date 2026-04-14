@@ -17,6 +17,7 @@ from embedding_pipeline import (
     setup_qdrant,
     upsert_to_qdrant,
 )
+from indexed_laws_tracker import upsert_indexed_law
 from service_clients import get_qdrant_client
 
 
@@ -68,6 +69,7 @@ def main():
         print(f"\n  {law['id']} — {len(chunks)} chunks …", flush=True)
         embeddings = embed_chunks(chunks)
         upsert_to_qdrant(client, chunks, embeddings)
+        upsert_indexed_law(law, len(chunks))
         total_chunks += len(chunks)
         print(f"  ✓ upserted {len(chunks)} chunks for {law['id']}", flush=True)
 

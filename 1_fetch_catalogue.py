@@ -15,7 +15,7 @@ import re
 import requests
 from pathlib import Path
 from config import (
-    CATALOGUE_PATH, DATE_FROM, MAX_LAWS,
+    CATALOGUE_PATH, DATE_FROM, MAX_LAWS, CATALOGUE_OFFSET,
     CATEGORY_FILTER, HUMANITARIAN_KEYWORDS, REQUEST_TIMEOUT
 )
 
@@ -172,8 +172,12 @@ def apply_filters(entries: list[dict]) -> list[dict]:
                 continue
 
         filtered.append(e)
-        if len(filtered) >= MAX_LAWS:
-            break
+
+    if CATALOGUE_OFFSET > 0:
+        filtered = filtered[CATALOGUE_OFFSET:]
+
+    if MAX_LAWS > 0:
+        filtered = filtered[:MAX_LAWS]
 
     return filtered
 
@@ -264,7 +268,10 @@ def main():
 
     # Apply filters
     entries = apply_filters(entries)
-    print(f"After filters (date≥{DATE_FROM}, max={MAX_LAWS}): {len(entries)} entries")
+    print(
+        f"After filters (date≥{DATE_FROM}, offset={CATALOGUE_OFFSET}, max={MAX_LAWS}): "
+        f"{len(entries)} entries"
+    )
 
     # Save
     CATALOGUE_PATH.write_text(

@@ -49,6 +49,10 @@ QDRANT_URL = _first_env("QDRANT_URL", "QDRANT_API_URL", "QDRANT_UR", default="ht
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "").strip()
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "rada_legislation")
 
+# Postgres (staging layer before Qdrant)
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+STAGING_STORE_RAW_JSON = _env_bool("STAGING_STORE_RAW_JSON", default=False)
+
 # Docling
 DOCLING_API_URL = os.getenv("DOCLING_API_URL", "").strip()
 
@@ -72,6 +76,7 @@ BATCH_SIZE = 50         # laws per batch before saving progress
 # Scope filters (from .env)
 DATE_FROM = os.getenv("DATE_FROM", "2000-01-01")   # filter by enactment date
 MAX_LAWS = int(os.getenv("MAX_LAWS", "999999"))     # cap for testing
+CATALOGUE_OFFSET = int(os.getenv("CATALOGUE_OFFSET", "0"))
 CATEGORY_FILTER = os.getenv("CATEGORY_FILTER", "")  # optional keyword filter
 FORCE_RESCRAPE = _env_bool("FORCE_RESCRAPE", default=False)
 

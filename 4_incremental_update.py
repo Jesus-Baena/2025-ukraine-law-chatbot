@@ -14,7 +14,7 @@ import requests
 from datetime import datetime, date
 
 from config import (
-    LAWS_DIR, STATE_PATH, QDRANT_COLLECTION,
+    DATABASE_URL, LAWS_DIR, STATE_PATH, QDRANT_COLLECTION,
     REQUEST_DELAY, REQUEST_TIMEOUT
 )
 from qdrant_client import QdrantClient
@@ -26,8 +26,11 @@ from embedding_pipeline import (
     setup_qdrant,
     upsert_to_qdrant,
 )
+from indexed_laws_tracker import upsert_indexed_law
 from law_processing import extract_law, fetch_with_retry, safe_filename
 from service_clients import get_qdrant_client
+from staging_db import ensure_staging_schema, get_postgres_connection, stage_law_with_sections
+from staging_db import stage_raw_law_response
 
 
 HEADERS = {
@@ -95,7 +98,7 @@ def fetch_updated_ids(since_date: str) -> list[dict]:
     return updated
 
 
-def process_law(entry: dict, client: QdrantClient) -> bool:
+def process_law(entry: dict, client: QdrantClient, pg_conn=None) -> bool:
     """Scrape, embed, and upsert a single law. Returns True on success."""
     law_id = entry["id"]
     url = f"https://zakon.rada.gov.ua/laws/show/{law_id}"
@@ -105,7 +108,23 @@ def process_law(entry: dict, client: QdrantClient) -> bool:
         print(f"  ✗ Failed to fetch: {law_id}")
         return False
 
-    law = extract_law(response.text, law_id, url)
+    response_text = response.text
+    if pg_conn is not None:
+        try:
+            response_text = stage_raw_law_response(
+                pg_conn,
+                law_id=law_id,
+                source_url=response.url or url,
+                response_body=response_text,
+                http_status=response.status_code,
+                response_headers=dict(response.headers),
+                source_kind="law_html",
+            )
+        except Exception as e:
+            print(f"  ✗ Raw stage failed: {law_id} ({e})")
+            return False
+
+    law = extract_law(response_text, law_id, url)
     if not law or law.get("section_count", 0) == 0:
         print(f"  ✗ Empty body: {law_id}")
         return False
@@ -120,6 +139,9 @@ def process_law(entry: dict, client: QdrantClient) -> bool:
         encoding="utf-8"
     )
 
+    if pg_conn is not None:
+        stage_law_with_sections(pg_conn, law, source_catalogue_entry=entry)
+
     # Remove old vectors for this law, then re-insert
     delete_law_from_qdrant(client, law_id)
 
@@ -127,6 +149,7 @@ def process_law(entry: dict, client: QdrantClient) -> bool:
     if chunks:
         embeddings = embed_chunks(chunks)
         upsert_to_qdrant(client, chunks, embeddings)
+        upsert_indexed_law(law, len(chunks))
 
     return True
 
@@ -154,13 +177,25 @@ def main():
     client = get_qdrant_client()
     setup_qdrant(client)
 
+    pg_conn = None
+    if DATABASE_URL:
+        try:
+            pg_conn = get_postgres_connection()
+            ensure_staging_schema(pg_conn)
+            print("Postgres staging: enabled")
+        except Exception as e:
+            print(f"Postgres staging: disabled ({e})")
+            pg_conn = None
+    else:
+        print("Postgres staging: disabled (DATABASE_URL not set)")
+
     # Process each updated law
     success = 0
     failed = 0
 
     for i, entry in enumerate(updated_entries):
         print(f"[{i+1}/{len(updated_entries)}] {entry['id']}: {entry['title'][:60]}")
-        ok = process_law(entry, client)
+        ok = process_law(entry, client, pg_conn=pg_conn)
         if ok:
             success += 1
         else:
@@ -179,6 +214,9 @@ def main():
     print(f"  Failed:  {failed}")
     print(f"  Qdrant total vectors: {collection_info.points_count}")
     print(f"  Next run will check from: {state['last_run']}")
+
+    if pg_conn is not None:
+        pg_conn.close()
 
 
 if __name__ == "__main__":
